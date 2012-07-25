@@ -12,12 +12,9 @@ Written by: Mario Kicherer (http://kicherer.org)
 
 """
 
-import sys,re,os, argparse
-from PyQt4 import QtGui, QtCore
-
-import ConfigParser, subprocess
+import sys, re, os, argparse, ConfigParser, subprocess
 import dbus, avahi
-from dbus import DBusException
+from PyQt4 import QtGui, QtCore
 from dbus.mainloop.glib import DBusGMainLoop
 
 try:
@@ -33,9 +30,7 @@ root={}
 # classes
 #
 
-class AService:
-	classname = "Service"
-	
+class Service:
 	def __init__(self, host, protocol, name, stype, port, txt):
 		self.host = host
 		self.protocol = protocol
@@ -65,7 +60,7 @@ class AService:
 	
 	def on_new(self):
 		try:
-			cmd = config.get("EventActions", "on_new%s" % self.classname);
+			cmd = config.get("EventActions", "on_new%s" % self.__class__.__name__);
 		except ConfigParser.NoOptionError:
 			pass
 		else:
@@ -75,7 +70,7 @@ class AService:
 	
 	def on_rem(self):
 		try:
-			cmd = config.get("EventActions", "on_rem%s" % self.classname);
+			cmd = config.get("EventActions", "on_rem%s" % self.__class__.__name__);
 		except ConfigParser.NoOptionError:
 			pass
 		else:
@@ -84,9 +79,7 @@ class AService:
 		show_notification("Removed service: \"%s\" type: %s on %s" %(self.name, self.stype, self.host.fqdn))
 	
 
-class AHost:
-	classname = "Host"
-	
+class Host:
 	def __init__(self, name, domain, fqdn, address):
 		self.name = name
 		self.domain = domain
@@ -103,7 +96,7 @@ class AHost:
 	
 	def on_new(self):
 		try:
-			cmd = config.get("EventActions", "on_new%s" % self.classname);
+			cmd = config.get("EventActions", "on_new%s" % self.__class__.__name__);
 		except ConfigParser.NoOptionError:
 			pass
 		else:
@@ -113,7 +106,7 @@ class AHost:
 	
 	def on_rem(self):
 		try:
-			cmd = config.get("EventActions", "on_rem%s" % self.classname);
+			cmd = config.get("EventActions", "on_rem%s" % self.__class__.__name__);
 		except ConfigParser.NoOptionError:
 			pass
 		else:
@@ -121,7 +114,7 @@ class AHost:
 		
 		show_notification("Removed host: \"%s\" on %s" %(self.name, self.fqdn))
 
-class AServiceType:
+class ServiceType:
 	def __init__(self, stype):
 		self.stype = stype;
 		self.submenu = None
@@ -130,16 +123,11 @@ class AServiceType:
 # helper functions
 #
 
-def pprint_stype(stype):
-	return re.sub(r'_(.*)\._(.*)', r'\1,\2', stype)
-
 def print_error(*args):
 	print 'error_handler'
 	print args
 
 def add_action(menu, name, data, fct):
-	global trayIcon
-	
 	Action = menu.addAction(name)
 	
 	receiver = lambda data=data: fct(data)
@@ -163,6 +151,8 @@ def execute_cmd(cmd):
 
 def show_notification(text):
 	if use_pynotify:
+		if not pynotify.is_initted():
+			pynotify.init("avahi-tray")
 		n = pynotify.Notification(text)
 		n.show()
 
@@ -174,8 +164,10 @@ def new_service(interface, protocol, name, stype, domain, fqdn, aprotocol, addre
 	if verbose:
 		print "New service: %s:%s:%s:%d (%s)" %(fqdn, address, stype, port, avahi.txt_array_to_string_array(txt))
 	
+	# host already known?
 	if not fqdn in root[(interface, domain)]["hosts"]:
-		host = AHost(name, domain, fqdn, address)
+		host = Host(name, domain, fqdn, address)
+		
 		host.submenu = add_menu(trayIcon.hostmenu, fqdn);
 		root[(interface, domain)]["hosts"][fqdn] = host;
 		
@@ -183,28 +175,28 @@ def new_service(interface, protocol, name, stype, domain, fqdn, aprotocol, addre
 	else:
 		host = root[(interface, domain)]["hosts"][fqdn];
 	
-	submenu = host.submenu
-	item = AService(host, protocol, name, stype, port, avahi.txt_array_to_string_array(txt))
+	service = Service(host, protocol, name, stype, port, avahi.txt_array_to_string_array(txt))
 	
 	# is service already in hostmenu?
 	if not name in host.services:
-		host.services[name] = item;
-		item.on_new()
-		title = "%s (%s)" % (name, pprint_stype(stype));
-		item.menuentry = (add_action(submenu, title, item, item.onClick));
+		host.services[name] = service;
+		service.on_new()
+		title = "%s (%s)" % (name, re.sub(r'_(.*)\._(.*)', r'\1,\2', stype));
+		service.menuentry = (add_action(host.submenu, title, service, service.onClick));
 	
 	# is service already in servicemenu?
 	if not name in root[(interface, domain)]["services"][stype]["items"]:
-		root[(interface, domain)]["services"][stype]["items"][name] = item
+		root[(interface, domain)]["services"][stype]["items"][name] = service
 		ssubmenu = root[(interface, domain)]["services"][stype]["obj"].submenu
 		title = "%s (%s)" % (name, fqdn);
-		item.smenuentry = (add_action(ssubmenu, title, item, item.onClick));
+		service.smenuentry = (add_action(ssubmenu, title, service, service.onClick));
 	
 
 def remove_service(interface, protocol, name, stype, domain, fqdn, aprotocol, address, port, txt, flags):
 	if verbose:
 		print "Remove service '%s' type '%s' domain '%s' " % (name, stype, domain)
 	
+	# is host known?
 	if not fqdn in root[(interface, domain)]["hosts"]:
 		if verbose:
 			print "unknown host"
@@ -243,27 +235,17 @@ def remove_service(interface, protocol, name, stype, domain, fqdn, aprotocol, ad
 		del root[(interface, domain)]["services"][stype]
 
 def s_new_handler(interface, protocol, name, stype, domain, flags):
-	global server
-	global trayIcon
-	
-	server.ResolveService(interface, protocol, name, stype, 
+	avahi_server.ResolveService(interface, protocol, name, stype, 
 		domain, avahi.PROTO_UNSPEC, dbus.UInt32(0), 
 		reply_handler=new_service, error_handler=print_error)
 
 def s_remove_handler(interface, protocol, name, stype, domain, flags):
-	global server
-	global trayIcon
-	
-	server.ResolveService(interface, protocol, name, stype,
+	avahi_server.ResolveService(interface, protocol, name, stype,
 		domain, avahi.PROTO_UNSPEC, dbus.UInt32(0),
 		reply_handler=remove_service, error_handler=print_error)
 
 # on new service type
 def st_new_handler(interface, protocol, stype, domain, flags):
-	global server
-	global trayIcon
-	global bus
-	
 	if verbose:
 		print "New service type: %s" %(stype)
 	
@@ -271,7 +253,7 @@ def st_new_handler(interface, protocol, stype, domain, flags):
 	#if flags & avahi.LOOKUP_RESULT_LOCAL:
 		#pass
 	
-	s = AServiceType(stype)
+	s = ServiceType(stype)
 	
 	if not (interface, domain) in root:
 		root[(interface, domain)] = {}
@@ -283,11 +265,11 @@ def st_new_handler(interface, protocol, stype, domain, flags):
 		root[(interface, domain)]["services"][stype]["obj"] = s;
 		root[(interface, domain)]["services"][stype]["items"] = {}
 		
-		s.submenu = add_menu(trayIcon.servicemenu, pprint_stype(stype));
+		s.submenu = add_menu(trayIcon.servicemenu, re.sub(r'_(.*)\._(.*)', r'\1 (\2)', stype));
 	
 	sbrowser = dbus.Interface(bus.get_object(avahi.DBUS_NAME,
-		server.ServiceBrowserNew(interface, protocol, stype, domain, dbus.UInt32(0))),
-		avahi.DBUS_INTERFACE_SERVICE_BROWSER)
+		avahi_server.ServiceBrowserNew(interface, protocol, stype, domain,
+		dbus.UInt32(0))), avahi.DBUS_INTERFACE_SERVICE_BROWSER)
 	
 	# call s_new_handler if a new service appears
 	sbrowser.connect_to_signal("ItemNew", s_new_handler)
@@ -299,27 +281,28 @@ def d_new_handler(interface, protocol, domain, flags):
 		print "New domain: %s" %(domain)
 	
 	stbrowser = dbus.Interface(bus.get_object(avahi.DBUS_NAME,
-		server.ServiceTypeBrowserNew(interface, protocol, domain, dbus.UInt32(0))),
-		avahi.DBUS_INTERFACE_SERVICE_TYPE_BROWSER)
+		avahi_server.ServiceTypeBrowserNew(interface, protocol, domain,
+		dbus.UInt32(0))), avahi.DBUS_INTERFACE_SERVICE_TYPE_BROWSER)
 	
 	# call st_new_handler if a new service type appears
 	stbrowser.connect_to_signal("ItemNew", st_new_handler)
 
 # start querying Avahi
 def start_avahi():
-	global server
+	global avahi_server
 	global bus
 	
 	loop = DBusGMainLoop()
 	bus = dbus.SystemBus(mainloop=loop)
 	
-	server = dbus.Interface( bus.get_object(avahi.DBUS_NAME, '/'),
-			'org.freedesktop.Avahi.Server')
-
+	avahi_server = dbus.Interface(bus.get_object(avahi.DBUS_NAME, '/'), 'org.freedesktop.Avahi.Server')
+	
+	# explicitly browse "local" domain
 	d_new_handler(avahi.IF_UNSPEC,avahi.PROTO_UNSPEC, "local", dbus.UInt32(0));
 	
 	dbrowser = dbus.Interface(bus.get_object(avahi.DBUS_NAME,
-		server.DomainBrowserNew(avahi.IF_UNSPEC, avahi.PROTO_UNSPEC, "", avahi.DOMAIN_BROWSER_BROWSE, dbus.UInt32(0))),
+		avahi_server.DomainBrowserNew(avahi.IF_UNSPEC, avahi.PROTO_UNSPEC,
+		"", avahi.DOMAIN_BROWSER_BROWSE, dbus.UInt32(0))),
 		avahi.DBUS_INTERFACE_DOMAIN_BROWSER);
 	
 	# call d_new_handler if a new domain appears
@@ -331,13 +314,12 @@ class SystemTrayIcon(QtGui.QSystemTrayIcon):
 		self.mainmenu = QtGui.QMenu(parent)
 		
 		self.hostmenu = self.mainmenu.addMenu("Hosts")
-		
 		self.servicemenu = self.mainmenu.addMenu("Services")
 		
 		self.mainmenu.addSeparator()
 		
 		if pynotify_available:
-			notifyAction = self.mainmenu.addAction("Enable notification")
+			notifyAction = self.mainmenu.addAction("Enable notifications")
 			notifyAction.setCheckable(1);
 			if use_pynotify:
 				notifyAction.setChecked(1);
@@ -375,19 +357,18 @@ def main():
 	args = parser.parse_args()
 	
 	verbose = args.verbose
+	
 	if pynotify_available:
 		use_pynotify = (args.notify == 1)
 	else:
 		use_pynotify = False
+	
 	#
 	# Read configs
 	#
 	
 	config = ConfigParser.SafeConfigParser()
 	config.read(['/usr/share/avahi-tray/config.ini', 'config.ini', os.path.expanduser('~/.avahi-tray')])
-	
-	if use_pynotify:
-		pynotify.init("avahi-tray")
 	
 	#
 	# Setup menu and query avahi
