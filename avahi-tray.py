@@ -204,19 +204,20 @@ def remove_service(interface, protocol, name, stype, domain, fqdn, aprotocol, ad
 	# delete service from host menu
 	if name in root[(interface, domain)]["hosts"][fqdn].services:
 		root[(interface, domain)]["hosts"][fqdn].services[name].on_rem()
-		remove_action(root[(interface, domain)]["services"][stype]["obj"].submenu, root[(interface, domain)]["hosts"][fqdn].services[name].menuentry)
+		remove_action(root[(interface, domain)]["hosts"][fqdn].submenu, root[(interface, domain)]["hosts"][fqdn].services[name].menuentry)
+		
 		del root[(interface, domain)]["hosts"][fqdn].services[name]
 	
 	# delete service from service menu
 	if name in root[(interface, domain)]["services"][stype]["items"]:
-		remove_action(root[(interface, domain)]["hosts"][fqdn].submenu, root[(interface, domain)]["services"][stype]["items"][name].smenuentry)
+		remove_action(root[(interface, domain)]["services"][stype]["obj"].submenu, root[(interface, domain)]["services"][stype]["items"][name].smenuentry)
 		del root[(interface, domain)]["services"][stype]["items"][name]
 	
 	# last service of this host? if yes delete host menu
 	if len(root[(interface, domain)]["hosts"][fqdn].services.keys()) < 1:
 		root[(interface, domain)]["hosts"][fqdn].on_rem();
 		
-		# somehow does not remove the submenu reliably
+		# TODO how to remove QMenu?
 		root[(interface, domain)]["hosts"][fqdn].submenu.clear()
 		root[(interface, domain)]["hosts"][fqdn].submenu.setVisible(False)
 		root[(interface, domain)]["hosts"][fqdn].submenu.deleteLater()
@@ -226,6 +227,7 @@ def remove_service(interface, protocol, name, stype, domain, fqdn, aprotocol, ad
 	# last instance of service type? if yes, delete menu
 	if len(root[(interface, domain)]["services"][stype]["items"].keys()) < 1:
 		ssubmenu = root[(interface, domain)]["services"][stype]["obj"].submenu
+		# TODO how to remove QMenu?
 		ssubmenu.clear()
 		ssubmenu.setVisible(False)
 		ssubmenu.deleteLater()
@@ -294,7 +296,11 @@ def start_avahi():
 	loop = DBusGMainLoop()
 	bus = dbus.SystemBus(mainloop=loop)
 	
-	avahi_server = dbus.Interface(bus.get_object(avahi.DBUS_NAME, '/'), 'org.freedesktop.Avahi.Server')
+	try:
+		avahi_server = dbus.Interface(bus.get_object(avahi.DBUS_NAME, '/'), 'org.freedesktop.Avahi.Server')
+	except dbus.exceptions.DBusException:
+		print "Error contacting the avahi server, maybe the daemon is not running?"
+		sys.exit(1)
 	
 	# explicitly browse "local" domain
 	d_new_handler(avahi.IF_UNSPEC,avahi.PROTO_UNSPEC, "local", dbus.UInt32(0));
