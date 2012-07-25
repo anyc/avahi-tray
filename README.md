@@ -7,6 +7,7 @@ on certain events or if a certain service has been selected. With python-notify,
 certain events can also be reported to the user using libnotify.
 
 Benefits:
+
 	* Keep up with active hosts and services in your local (ad-hoc) network
 	* Quickly browse and connect to available services
 	* Customizable actions on events and services
