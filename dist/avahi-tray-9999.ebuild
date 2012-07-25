@@ -15,13 +15,12 @@ LICENSE="GPL-2"
 KEYWORDS="~x86 ~amd64"
 IUSE="libnotify"
 
-RDEPEND="${DEPEND}
-	dev-python/PyQt4
+RDEPEND="dev-python/PyQt4
 	dev-python/dbus-python
 	net-dns/avahi[python]
 	libnotify? ( dev-python/notify-python )
 	"
-DEPEND="${DEPEND}
+DEPEND="${RDEPEND}
 	dev-python/setuptools"
 
 src_install() {
