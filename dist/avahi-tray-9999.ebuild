@@ -13,9 +13,14 @@ EGIT_REPO_URI="git://github.com/anyc/avahi-tray.git"
 SLOT=0
 LICENSE="GPL-2"
 KEYWORDS="~x86 ~amd64"
-IUSE=""
+IUSE="libnotify"
 
-RDEPEND="${DEPEND}"
+RDEPEND="${DEPEND}
+	dev-python/PyQt4
+	dev-python/dbus-python
+	net-dns/avahi[python]
+	libnotify? ( dev-python/notify-python )
+	"
 DEPEND="${DEPEND}
 	dev-python/setuptools"
 
