@@ -8,7 +8,7 @@ avahi-tray.py
 Avahi-tray.py is an application in the system tray that enables fast access on
 services announced through Avahi/MDNS.
 
-Written by: Mario Kicherer (http://kicherer.org)
+Written by Mario Kicherer (http://kicherer.org)
 
 """
 
@@ -49,10 +49,11 @@ class Service:
 			self.execute(cmd);
 	
 	def execute(self, cmd):
-		cmd = cmd.replace("$n", self.host.name);
+		cmd = cmd.replace("$d", self.host.domain);
 		cmd = cmd.replace("$h", self.host.fqdn);
 		
-		cmd = cmd.replace("$d", str(len(self.txt)));
+		cmd = cmd.replace("$n", self.name);
+		cmd = cmd.replace("$u", str(len(self.txt)));
 		cmd = cmd.replace("$t", " ".join(self.txt));
 		cmd = cmd.replace("$s", self.stype);
 		cmd = cmd.replace("$p", str(self.port));
@@ -80,17 +81,15 @@ class Service:
 	
 
 class Host:
-	def __init__(self, name, domain, fqdn, address):
-		self.name = name
+	def __init__(self, domain, fqdn):
 		self.domain = domain
 		self.fqdn = fqdn
-		self.address = address
 		
 		self.services = {}
 		self.submenu = None
 	
 	def execute(self, cmd):
-		cmd = cmd.replace("$n", self.name);
+		cmd = cmd.replace("$d", self.domain);
 		cmd = cmd.replace("$h", self.fqdn);
 		execute_cmd(cmd)
 	
@@ -102,7 +101,7 @@ class Host:
 		else:
 			self.execute(cmd);
 		
-		show_notification("New host: \"%s\" on %s" %(self.name, self.fqdn))
+		show_notification("New host: %s" %(self.fqdn))
 	
 	def on_rem(self):
 		try:
@@ -112,7 +111,7 @@ class Host:
 		else:
 			self.execute(cmd);
 		
-		show_notification("Removed host: \"%s\" on %s" %(self.name, self.fqdn))
+		show_notification("Removed host: %s" %(self.fqdn))
 
 class ServiceType:
 	def __init__(self, stype):
@@ -166,7 +165,7 @@ def new_service(interface, protocol, name, stype, domain, fqdn, aprotocol, addre
 	
 	# host already known?
 	if not fqdn in root[(interface, domain)]["hosts"]:
-		host = Host(name, domain, fqdn, address)
+		host = Host(domain, fqdn)
 		
 		host.submenu = add_menu(trayIcon.hostmenu, fqdn);
 		root[(interface, domain)]["hosts"][fqdn] = host;
