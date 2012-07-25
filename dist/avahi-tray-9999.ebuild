@@ -4,7 +4,7 @@
 
 EAPI="4"
 
-inherit distutils git-2
+inherit eutils distutils git-2
 
 DESCRIPTION="An application in the system tray that enables fast access on services announced through Avahi/MDNS"
 HOMEPAGE="https://github.com/anyc/avahi-tray"
@@ -18,3 +18,10 @@ IUSE=""
 RDEPEND="${DEPEND}"
 DEPEND="${DEPEND}
 	dev-python/setuptools"
+
+src_install() {
+	distutils_src_install
+
+	# borrow the icon from knetattach
+	make_desktop_entry /usr/bin/avahi-tray.py avahi-tray knetattach Network
+}
