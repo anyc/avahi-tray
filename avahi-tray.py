@@ -170,7 +170,7 @@ def show_notification(text):
 # main functions
 #
 
-def service2class(interface, protocol, name, stype, domain, fqdn, aprotocol, address, port, txt, flags):
+def new_service(interface, protocol, name, stype, domain, fqdn, aprotocol, address, port, txt, flags):
 	if verbose:
 		print "New service: %s:%s:%s:%d (%s)" %(fqdn, address, stype, port, avahi.txt_array_to_string_array(txt))
 	
@@ -248,7 +248,7 @@ def s_new_handler(interface, protocol, name, stype, domain, flags):
 	
 	server.ResolveService(interface, protocol, name, stype, 
 		domain, avahi.PROTO_UNSPEC, dbus.UInt32(0), 
-		reply_handler=service2class, error_handler=print_error)
+		reply_handler=new_service, error_handler=print_error)
 
 def s_remove_handler(interface, protocol, name, stype, domain, flags):
 	global server
@@ -333,14 +333,14 @@ class SystemTrayIcon(QtGui.QSystemTrayIcon):
 		self.hostmenu = self.mainmenu.addMenu("Hosts")
 		
 		self.servicemenu = self.mainmenu.addMenu("Services")
-		#self.servicemenu.setVisible(False)
-		#self.servicemenu.deleteLater()
 		
 		self.mainmenu.addSeparator()
 		
 		if pynotify_available:
 			notifyAction = self.mainmenu.addAction("Enable notification")
 			notifyAction.setCheckable(1);
+			if use_pynotify:
+				notifyAction.setChecked(1);
 			self.connect(notifyAction, QtCore.SIGNAL('triggered()'), self.toggle_notify)
 		
 		restartAction = self.mainmenu.addAction("Restart")
@@ -371,7 +371,7 @@ def main():
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-v", "--verbose", help="Enable verbose output", action="store_true")
-	parser.add_argument("-n", "--notify", help="Enable/Disable libnotify output", type=int)
+	parser.add_argument("-n", "--notify", help="Enable/Disable libnotify output =[01]", type=int)
 	args = parser.parse_args()
 	
 	verbose = args.verbose
@@ -387,7 +387,7 @@ def main():
 	config.read(['/usr/share/avahi-tray/config.ini', 'config.ini', os.path.expanduser('~/.avahi-tray')])
 	
 	if use_pynotify:
-		pynotify.init("icon-summary-body")
+		pynotify.init("avahi-tray")
 	
 	#
 	# Setup menu and query avahi
