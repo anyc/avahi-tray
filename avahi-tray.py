@@ -1,4 +1,4 @@
-#! /usr/bin/python
+#! /usr/bin/env python2.7
 
 """
 
@@ -160,8 +160,10 @@ def show_notification(text):
 #
 
 def new_service(interface, protocol, name, stype, domain, fqdn, aprotocol, address, port, txt, flags):
+	txt = avahi.txt_array_to_string_array(txt)
+	
 	if verbose:
-		print "New service: %s:%s:%s:%d (%s)" %(fqdn, address, stype, port, avahi.txt_array_to_string_array(txt))
+		print "New service: %s:%s:%s:%d (%s)" %(fqdn, address, stype, port, txt)
 	
 	# host already known?
 	if not fqdn in root[(interface, domain)]["hosts"]:
@@ -174,11 +176,11 @@ def new_service(interface, protocol, name, stype, domain, fqdn, aprotocol, addre
 	else:
 		host = root[(interface, domain)]["hosts"][fqdn];
 	
-	service = Service(host, protocol, name, stype, port, avahi.txt_array_to_string_array(txt))
+	service = Service(host, protocol, name, stype, port, txt)
 	
 	# is service already in hostmenu?
-	if not name in host.services:
-		host.services[name] = service;
+	if not (name,stype,port) in host.services:
+		host.services[(name,stype,port)] = service;
 		service.on_new()
 		title = "%s (%s)" % (name, re.sub(r'_(.*)\._(.*)', r'\1,\2', stype));
 		service.menuentry = (add_action(host.submenu, title, service, service.onClick));
@@ -192,6 +194,8 @@ def new_service(interface, protocol, name, stype, domain, fqdn, aprotocol, addre
 	
 
 def remove_service(interface, protocol, name, stype, domain, fqdn, aprotocol, address, port, txt, flags):
+	txt = avahi.txt_array_to_string_array(txt)
+	
 	if verbose:
 		print "Remove service '%s' type '%s' domain '%s' " % (name, stype, domain)
 	
@@ -202,11 +206,11 @@ def remove_service(interface, protocol, name, stype, domain, fqdn, aprotocol, ad
 		return
 	
 	# delete service from host menu
-	if name in root[(interface, domain)]["hosts"][fqdn].services:
-		root[(interface, domain)]["hosts"][fqdn].services[name].on_rem()
-		remove_action(root[(interface, domain)]["hosts"][fqdn].submenu, root[(interface, domain)]["hosts"][fqdn].services[name].menuentry)
+	if (name,stype,port) in root[(interface, domain)]["hosts"][fqdn].services:
+		root[(interface, domain)]["hosts"][fqdn].services[(name,stype,port)].on_rem()
+		remove_action(root[(interface, domain)]["hosts"][fqdn].submenu, root[(interface, domain)]["hosts"][fqdn].services[(name,stype,port)].menuentry)
 		
-		del root[(interface, domain)]["hosts"][fqdn].services[name]
+		del root[(interface, domain)]["hosts"][fqdn].services[(name,stype,port)]
 	
 	# delete service from service menu
 	if name in root[(interface, domain)]["services"][stype]["items"]:
@@ -219,21 +223,21 @@ def remove_service(interface, protocol, name, stype, domain, fqdn, aprotocol, ad
 		
 		# TODO how to remove QMenu?
 		root[(interface, domain)]["hosts"][fqdn].submenu.clear()
-		root[(interface, domain)]["hosts"][fqdn].submenu.setVisible(False)
+		#root[(interface, domain)]["hosts"][fqdn].submenu.setVisible(False)
 		root[(interface, domain)]["hosts"][fqdn].submenu.deleteLater()
 		del root[(interface, domain)]["hosts"][fqdn].submenu
 		del root[(interface, domain)]["hosts"][fqdn]
 	
 	# last instance of service type? if yes, delete menu
-	if len(root[(interface, domain)]["services"][stype]["items"].keys()) < 1:
-		ssubmenu = root[(interface, domain)]["services"][stype]["obj"].submenu
+	#if len(root[(interface, domain)]["services"][stype]["items"].keys()) < 1:
+		#ssubmenu = root[(interface, domain)]["services"][stype]["obj"].submenu
 		# TODO how to remove QMenu?
-		ssubmenu.clear()
-		ssubmenu.setVisible(False)
-		ssubmenu.deleteLater()
-		del ssubmenu
-		del root[(interface, domain)]["services"][stype]["obj"]
-		del root[(interface, domain)]["services"][stype]
+		#ssubmenu.clear()
+		#ssubmenu.setVisible(False)
+		#ssubmenu.deleteLater()
+		#del ssubmenu
+		#del root[(interface, domain)]["services"][stype]["obj"]
+		#del root[(interface, domain)]["services"][stype]
 
 def s_new_handler(interface, protocol, name, stype, domain, flags):
 	avahi_server.ResolveService(interface, protocol, name, stype, 
