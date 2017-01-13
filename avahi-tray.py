@@ -1,29 +1,34 @@
-#! /usr/bin/env python2.7
+#! /usr/bin/env python2
+#
+# avahi-tray
+# ----------
+#
+# Avahi-tray is an application in the system tray that enables fast access on
+# services published in your local network using, e.g., MDNS, Bonjour and Avahi.
+#
+# Copyright (C) 2015 Mario Kicherer (dev@kicherer.org)
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+#
 
-"""
-
-avahi-tray.py
--------------
-
-Avahi-tray.py is an application in the system tray that enables fast access on
-services announced through Avahi/MDNS.
-
-Written by Mario Kicherer (http://kicherer.org)
-
-"""
-
-import sys, re, os, argparse, ConfigParser, subprocess
+import sys, re, os, argparse, ConfigParser, subprocess, threading
 import dbus, avahi
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtGui, QtCore
+from PyQt5.QtWidgets import QSystemTrayIcon, QApplication, QWidget, QMenu
 from dbus.mainloop.glib import DBusGMainLoop
 
-try:
-	import pynotify
-	pynotify_available = True
-except ImportError:
-	pynotify_available = False
-
-verbose=0
+config={}
 root={}
 
 #
@@ -39,12 +44,18 @@ class Service:
 		self.port = port;
 		self.txt = txt;
 		
+		try:
+			self.alias = config["db"].get("Aliases", stype);
+		except ConfigParser.NoOptionError:
+			self.alias = stype
+			pass
+		
 	def onClick(self, data):
 		try:
-			cmd = config.get("ServiceActions", self.stype);
+			cmd = config["db"].get("ServiceActions", self.stype);
 		except ConfigParser.NoOptionError:
-			if verbose:
-				print "No action for %s" % (self.stype)
+			if config["verbose"]:
+				print("No action for %s" % (self.stype))
 		else:
 			self.execute(cmd);
 	
@@ -61,23 +72,23 @@ class Service:
 	
 	def on_new(self):
 		try:
-			cmd = config.get("EventActions", "on_new%s" % self.__class__.__name__);
+			cmd = config["db"].get("EventActions", "on_new%s" % self.__class__.__name__);
 		except ConfigParser.NoOptionError:
 			pass
 		else:
 			self.execute(cmd);
 			
-		show_notification("New service: \"%s\" type: %s on %s" %(self.name, self.stype, self.host.fqdn))
+		show_notification("New service: \"%s\"\ntype: %s on %s" %(self.name, self.stype, self.host.fqdn))
 	
 	def on_rem(self):
 		try:
-			cmd = config.get("EventActions", "on_rem%s" % self.__class__.__name__);
+			cmd = config["db"].get("EventActions", "on_rem%s" % self.__class__.__name__);
 		except ConfigParser.NoOptionError:
 			pass
 		else:
 			self.execute(cmd);
 		
-		show_notification("Removed service: \"%s\" type: %s on %s" %(self.name, self.stype, self.host.fqdn))
+		show_notification("Removed service: \"%s\"\ntype: %s on %s" %(self.name, self.stype, self.host.fqdn))
 	
 
 class Host:
@@ -95,8 +106,8 @@ class Host:
 	
 	def on_new(self):
 		try:
-			cmd = config.get("EventActions", "on_new%s" % self.__class__.__name__);
-		except ConfigParser.NoOptionError:
+			cmd = config["db"].get("EventActions", "on_new%s" % self.__class__.__name__);
+		except configparser.NoOptionError:
 			pass
 		else:
 			self.execute(cmd);
@@ -105,8 +116,8 @@ class Host:
 	
 	def on_rem(self):
 		try:
-			cmd = config.get("EventActions", "on_rem%s" % self.__class__.__name__);
-		except ConfigParser.NoOptionError:
+			cmd = config["db"].get("EventActions", "on_rem%s" % self.__class__.__name__);
+		except configparser.NoOptionError:
 			pass
 		else:
 			self.execute(cmd);
@@ -123,33 +134,18 @@ class ServiceType:
 #
 
 def print_error(*args):
-	print 'error_handler'
-	print args
-
-def add_action(menu, name, data, fct):
-	Action = menu.addAction(name)
-	
-	receiver = lambda data=data: fct(data)
-	trayIcon.connect(Action, QtCore.SIGNAL('triggered()'), receiver)
-	
-	return Action;
-
-def add_menu(menu, name):
-	Action = menu.addMenu(name)
-	
-	return Action;
-
-def remove_action(menu,entry):
-	menu.removeAction(entry);
-	del entry
+	print('error_handler')
+	print(args)
 
 def execute_cmd(cmd):
-	if verbose:
-		print "Executing: \"%s\"" %(cmd)
+	if config["verbose"]:
+		print("Executing: \"%s\"" %(cmd))
 	subprocess.call(cmd, shell=True);
 
 def show_notification(text):
-	if use_pynotify:
+	if config["use_pynotify"]:
+		import pynotify
+		
 		if not pynotify.is_initted():
 			pynotify.init("avahi-tray")
 		n = pynotify.Notification(text)
@@ -162,14 +158,15 @@ def show_notification(text):
 def new_service(interface, protocol, name, stype, domain, fqdn, aprotocol, address, port, txt, flags):
 	txt = avahi.txt_array_to_string_array(txt)
 	
-	if verbose:
-		print "New service: %s:%s:%s:%d (%s)" %(fqdn, address, stype, port, txt)
+	if config["verbose"]:
+		print("New service: %s:%s:%s:%d (%s)" %(fqdn, address, stype, port, txt))
+	
+	trayIcon.starttimer()
 	
 	# host already known?
 	if not fqdn in root[(interface, domain)]["hosts"]:
 		host = Host(domain, fqdn)
 		
-		host.submenu = add_menu(trayIcon.hostmenu, fqdn);
 		root[(interface, domain)]["hosts"][fqdn] = host;
 		
 		host.on_new();
@@ -178,81 +175,52 @@ def new_service(interface, protocol, name, stype, domain, fqdn, aprotocol, addre
 	
 	service = Service(host, protocol, name, stype, port, txt)
 	
-	# is service already in hostmenu?
-	if not (name,stype,port) in host.services:
-		host.services[(name,stype,port)] = service;
+	# register service to host
+	if not (name,stype) in host.services:
+		host.services[(name,stype)] = service;
 		service.on_new()
-		title = "%s (%s)" % (name, re.sub(r'_(.*)\._(.*)', r'\1,\2', stype));
-		service.menuentry = (add_action(host.submenu, title, service, service.onClick));
 	
-	# is service already in servicemenu?
+	# register service in the service directory
 	if not name in root[(interface, domain)]["services"][stype]["items"]:
 		root[(interface, domain)]["services"][stype]["items"][name] = service
-		ssubmenu = root[(interface, domain)]["services"][stype]["obj"].submenu
-		title = "%s (%s)" % (name, fqdn);
-		service.smenuentry = (add_action(ssubmenu, title, service, service.onClick));
 	
 
-def remove_service(interface, protocol, name, stype, domain, fqdn, aprotocol, address, port, txt, flags):
-	txt = avahi.txt_array_to_string_array(txt)
+def remove_service(interface, protocol, name, stype, domain, flags):
+	if config["verbose"]:
+		print("Remove service '%s' type '%s' domain '%s' " % (name, stype, domain))
 	
-	if verbose:
-		print "Remove service '%s' type '%s' domain '%s' " % (name, stype, domain)
+	trayIcon.starttimer()
 	
-	# is host known?
-	if not fqdn in root[(interface, domain)]["hosts"]:
-		if verbose:
-			print "unknown host"
-		return
-	
-	# delete service from host menu
-	if (name,stype,port) in root[(interface, domain)]["hosts"][fqdn].services:
-		root[(interface, domain)]["hosts"][fqdn].services[(name,stype,port)].on_rem()
-		remove_action(root[(interface, domain)]["hosts"][fqdn].submenu, root[(interface, domain)]["hosts"][fqdn].services[(name,stype,port)].menuentry)
-		
-		del root[(interface, domain)]["hosts"][fqdn].services[(name,stype,port)]
-	
-	# delete service from service menu
 	if name in root[(interface, domain)]["services"][stype]["items"]:
-		remove_action(root[(interface, domain)]["services"][stype]["obj"].submenu, root[(interface, domain)]["services"][stype]["items"][name].smenuentry)
+		fqdn = root[(interface, domain)]["services"][stype]["items"][name].host.fqdn
+	else:
+		fqdn = None
+	
+	# remove service from host
+	if fqdn and (name,stype) in root[(interface, domain)]["hosts"][fqdn].services:
+		root[(interface, domain)]["hosts"][fqdn].services[(name,stype)].on_rem()
+		
+		del root[(interface, domain)]["hosts"][fqdn].services[(name,stype)]
+	
+	# delete service from service directory
+	if name in root[(interface, domain)]["services"][stype]["items"]:
 		del root[(interface, domain)]["services"][stype]["items"][name]
 	
-	# last service of this host? if yes delete host menu
-	if len(root[(interface, domain)]["hosts"][fqdn].services.keys()) < 1:
+	# last service of this host? if yes delete host
+	if fqdn and len(list(root[(interface, domain)]["hosts"][fqdn].services.keys())) < 1:
 		root[(interface, domain)]["hosts"][fqdn].on_rem();
 		
-		# TODO how to remove QMenu?
-		root[(interface, domain)]["hosts"][fqdn].submenu.clear()
-		#root[(interface, domain)]["hosts"][fqdn].submenu.setVisible(False)
-		root[(interface, domain)]["hosts"][fqdn].submenu.deleteLater()
-		del root[(interface, domain)]["hosts"][fqdn].submenu
 		del root[(interface, domain)]["hosts"][fqdn]
-	
-	# last instance of service type? if yes, delete menu
-	#if len(root[(interface, domain)]["services"][stype]["items"].keys()) < 1:
-		#ssubmenu = root[(interface, domain)]["services"][stype]["obj"].submenu
-		# TODO how to remove QMenu?
-		#ssubmenu.clear()
-		#ssubmenu.setVisible(False)
-		#ssubmenu.deleteLater()
-		#del ssubmenu
-		#del root[(interface, domain)]["services"][stype]["obj"]
-		#del root[(interface, domain)]["services"][stype]
 
 def s_new_handler(interface, protocol, name, stype, domain, flags):
 	avahi_server.ResolveService(interface, protocol, name, stype, 
 		domain, avahi.PROTO_UNSPEC, dbus.UInt32(0), 
 		reply_handler=new_service, error_handler=print_error)
 
-def s_remove_handler(interface, protocol, name, stype, domain, flags):
-	avahi_server.ResolveService(interface, protocol, name, stype,
-		domain, avahi.PROTO_UNSPEC, dbus.UInt32(0),
-		reply_handler=remove_service, error_handler=print_error)
-
 # on new service type
 def st_new_handler(interface, protocol, stype, domain, flags):
-	if verbose:
-		print "New service type: %s" %(stype)
+	if config["verbose"]:
+		print("New service type: %s" %(stype))
 	
 	#if protocol != avahi.PROTO_INET:
 	#if flags & avahi.LOOKUP_RESULT_LOCAL:
@@ -269,8 +237,6 @@ def st_new_handler(interface, protocol, stype, domain, flags):
 		root[(interface, domain)]["services"][stype] = {}
 		root[(interface, domain)]["services"][stype]["obj"] = s;
 		root[(interface, domain)]["services"][stype]["items"] = {}
-		
-		s.submenu = add_menu(trayIcon.servicemenu, re.sub(r'_(.*)\._(.*)', r'\1 (\2)', stype));
 	
 	sbrowser = dbus.Interface(bus.get_object(avahi.DBUS_NAME,
 		avahi_server.ServiceBrowserNew(interface, protocol, stype, domain,
@@ -279,11 +245,11 @@ def st_new_handler(interface, protocol, stype, domain, flags):
 	# call s_new_handler if a new service appears
 	sbrowser.connect_to_signal("ItemNew", s_new_handler)
 	# call s_remove_handler if a service disappears
-	sbrowser.connect_to_signal("ItemRemove", s_remove_handler)
+	sbrowser.connect_to_signal("ItemRemove", remove_service)
 
 def d_new_handler(interface, protocol, domain, flags):
-	if verbose:
-		print "New domain: %s" %(domain)
+	if config["verbose"]:
+		print("New domain: %s" %(domain))
 	
 	stbrowser = dbus.Interface(bus.get_object(avahi.DBUS_NAME,
 		avahi_server.ServiceTypeBrowserNew(interface, protocol, domain,
@@ -303,48 +269,100 @@ def start_avahi():
 	try:
 		avahi_server = dbus.Interface(bus.get_object(avahi.DBUS_NAME, '/'), 'org.freedesktop.Avahi.Server')
 	except dbus.exceptions.DBusException:
-		print "Error contacting the avahi server, maybe the daemon is not running?"
+		print("Error contacting the avahi server, maybe the daemon is not running?")
 		sys.exit(1)
 	
 	# explicitly browse "local" domain
-	d_new_handler(avahi.IF_UNSPEC,avahi.PROTO_UNSPEC, "local", dbus.UInt32(0));
+	d_new_handler(avahi.IF_UNSPEC, avahi.PROTO_UNSPEC, "local", dbus.UInt32(0));
 	
 	dbrowser = dbus.Interface(bus.get_object(avahi.DBUS_NAME,
 		avahi_server.DomainBrowserNew(avahi.IF_UNSPEC, avahi.PROTO_UNSPEC,
-		"", avahi.DOMAIN_BROWSER_BROWSE, dbus.UInt32(0))),
+			"", avahi.DOMAIN_BROWSER_BROWSE, dbus.UInt32(0))),
 		avahi.DBUS_INTERFACE_DOMAIN_BROWSER);
 	
 	# call d_new_handler if a new domain appears
 	dbrowser.connect_to_signal("ItemNew", d_new_handler)
 
-class SystemTrayIcon(QtGui.QSystemTrayIcon):
+class SystemTrayIcon(QSystemTrayIcon):
 	def __init__(self, icon, parent=None):
-		QtGui.QSystemTrayIcon.__init__(self, icon, parent)
-		self.mainmenu = QtGui.QMenu(parent)
+		QSystemTrayIcon.__init__(self, icon, parent)
+		self.parent = parent
+		
+		self.timer = QtCore.QTimer(self)
+		self.timer.timeout.connect(self.update)
+		self.timer.setSingleShot(True)
+		
+		self.update()
+	
+	def update(self):
+		self.mainmenu = QMenu(self.parent)
 		
 		self.hostmenu = self.mainmenu.addMenu("Hosts")
 		self.servicemenu = self.mainmenu.addMenu("Services")
 		
 		self.mainmenu.addSeparator()
 		
-		if pynotify_available:
-			notifyAction = self.mainmenu.addAction("Enable notifications")
-			notifyAction.setCheckable(1);
-			if use_pynotify:
-				notifyAction.setChecked(1);
-			self.connect(notifyAction, QtCore.SIGNAL('triggered()'), self.toggle_notify)
+		if config["pynotify_available"]:
+			self.notifyAction = self.mainmenu.addAction("Enable notifications")
+			self.notifyAction.setCheckable(1);
+			if config["use_pynotify"]:
+				self.notifyAction.setChecked(1);
+			self.notifyAction.triggered.connect(self.toggle_notify)
 		
 		restartAction = self.mainmenu.addAction("Restart")
-		self.connect(restartAction, QtCore.SIGNAL('triggered()'), self.restart)
+		restartAction.triggered.connect(self.restart)
 		
 		quitAction = self.mainmenu.addAction("Exit")
-		self.connect(quitAction, QtCore.SIGNAL('triggered()'), QtGui.qApp, QtCore.SLOT('quit()'))
+		quitAction.triggered.connect(config["app"].quit)
+		
+		for k in root:
+			intf, domain = k
+			
+			for h in root[k]["hosts"]:
+				host = root[k]["hosts"][h]
+				
+				if len(host.services) < 1:
+					continue
+				
+				hmenu = self.hostmenu.addMenu(host.fqdn)
+				
+				for s in host.services:
+					name, stype = s
+					
+					action = hmenu.addAction("%s (%s)" % (host.services[s].alias, host.services[s].name))
+					
+					action.triggered.connect(host.services[s].onClick)
+			
+			for s in root[k]["services"]:
+				service = root[k]["services"][s]
+				
+				if len(service["items"]) < 1:
+					continue
+				
+				try:
+					alias = config["db"].get("Aliases", s);
+				except ConfigParser.NoOptionError:
+					alias = None
+					pass
+				
+				if alias:
+					smenu = self.servicemenu.addMenu(alias)
+				else:
+					smenu = self.servicemenu.addMenu(s)
+				
+				for i in service["items"]:
+					action = smenu.addAction("%s @%s" % (service["items"][i].name, service["items"][i].host.fqdn))
+					
+					action.triggered.connect(service["items"][i].onClick)
 		
 		self.setContextMenu(self.mainmenu)
 	
+	def starttimer(self):
+		if not self.timer.isActive():
+			self.timer.start(1000)
+	
 	def toggle_notify(self):
-		global use_pynotify
-		use_pynotify = not use_pynotify
+		config["use_pynotify"] = self.notifyAction.isChecked()
 	
 	def restart(self):
 		app = sys.executable
@@ -352,9 +370,6 @@ class SystemTrayIcon(QtGui.QSystemTrayIcon):
 
 def main():
 	global trayIcon
-	global config
-	global verbose
-	global use_pynotify
 	
 	#
 	# Parse commandline arguments
@@ -362,36 +377,42 @@ def main():
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-v", "--verbose", help="Enable verbose output", action="store_true")
-	parser.add_argument("-n", "--notify", help="Enable/Disable libnotify output =[01]", type=int)
+	parser.add_argument("-n", "--notify", help="Enable libnotify output", action="store_true")
 	args = parser.parse_args()
 	
-	verbose = args.verbose
+	config["verbose"] = args.verbose
 	
-	if pynotify_available:
-		use_pynotify = (args.notify == 1)
+	try:
+		import pynotify
+		config["pynotify_available"] = True
+	except ImportError:
+		config["pynotify_available"] = False
+		
+	if args.notify and config["pynotify_available"]:
+		config["use_pynotify"] = True
 	else:
-		use_pynotify = False
+		config["use_pynotify"] = False
 	
 	#
 	# Read configs
 	#
 	
-	config = ConfigParser.SafeConfigParser()
-	config.read(['/usr/share/avahi-tray/config.ini', 'config.ini', os.path.expanduser('~/.avahi-tray')])
+	config["db"] = ConfigParser.SafeConfigParser()
+	config["db"].read(['/usr/share/avahi-tray/config.ini', 'config.ini', os.path.expanduser('~/.avahi-tray')])
 	
 	#
 	# Setup menu and query avahi
 	#
 	
-	app = QtGui.QApplication(sys.argv)
+	config["app"] = QApplication(sys.argv)
 	
-	w = QtGui.QWidget()
-	trayIcon = SystemTrayIcon(QtGui.QIcon.fromTheme("network-workgroup"), w)
+	w = QWidget()
+	trayIcon = SystemTrayIcon(QtGui.QIcon.fromTheme("preferences-web-browser-shortcuts"), w)
 	
 	start_avahi()
 	
 	trayIcon.show()
-	sys.exit(app.exec_())
+	sys.exit(config["app"].exec_())
 
 if __name__ == '__main__':
 	main()
