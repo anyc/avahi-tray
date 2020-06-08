@@ -1,4 +1,4 @@
-#! /usr/bin/env python2
+#! /usr/bin/env python3
 #
 # avahi-tray
 # ----------
@@ -22,7 +22,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-import sys, re, os, argparse, ConfigParser, subprocess, threading
+import sys, re, os, argparse, configparser, subprocess, threading
 import dbus, avahi
 from PyQt5 import QtGui, QtCore
 from PyQt5.QtWidgets import QSystemTrayIcon, QApplication, QWidget, QMenu
@@ -46,14 +46,14 @@ class Service:
 		
 		try:
 			self.alias = config["db"].get("Aliases", stype);
-		except ConfigParser.NoOptionError:
+		except configparser.NoOptionError:
 			self.alias = stype
 			pass
 		
 	def onClick(self, data):
 		try:
 			cmd = config["db"].get("ServiceActions", self.stype);
-		except ConfigParser.NoOptionError:
+		except configparser.NoOptionError:
 			if config["verbose"]:
 				print("No action for %s" % (self.stype))
 		else:
@@ -73,7 +73,7 @@ class Service:
 	def on_new(self):
 		try:
 			cmd = config["db"].get("EventActions", "on_new%s" % self.__class__.__name__);
-		except ConfigParser.NoOptionError:
+		except configparser.NoOptionError:
 			pass
 		else:
 			self.execute(cmd);
@@ -83,7 +83,7 @@ class Service:
 	def on_rem(self):
 		try:
 			cmd = config["db"].get("EventActions", "on_rem%s" % self.__class__.__name__);
-		except ConfigParser.NoOptionError:
+		except configparser.NoOptionError:
 			pass
 		else:
 			self.execute(cmd);
@@ -341,7 +341,7 @@ class SystemTrayIcon(QSystemTrayIcon):
 				
 				try:
 					alias = config["db"].get("Aliases", s);
-				except ConfigParser.NoOptionError:
+				except configparser.NoOptionError:
 					alias = None
 					pass
 				
@@ -397,7 +397,7 @@ def main():
 	# Read configs
 	#
 	
-	config["db"] = ConfigParser.SafeConfigParser()
+	config["db"] = configparser.SafeConfigParser()
 	config["db"].read(['/usr/share/avahi-tray/config.ini', 'config.ini', os.path.expanduser('~/.avahi-tray')])
 	
 	#
